@@ -1,4 +1,3 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/e8624880-358d-41bc-a938-0f77e4c99e7b" />
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/561b6adb-9b8e-4432-ab8b-232a3d9e726a" />
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8c128e6d-4c0e-4165-9d1c-618185a98f5a" />
 <img width="1295" height="844" alt="Captura de tela 2026-10-06 223402" src="https://github.com/user-attachments/assets/7c2e7eb8-0997-42e1-89c3-33d01c1b121a" />
