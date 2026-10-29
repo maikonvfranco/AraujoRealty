@@ -15,6 +15,8 @@ export default function Home() {
 
       <Inicio />
 
+      <Imoveis />
+
       <Hero />
 
       <Sobre />
@@ -22,8 +24,6 @@ export default function Home() {
       <Servicos />
 
       <Equipe />
-
-      <Imoveis />
 
       <Footer />
 

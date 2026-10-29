@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db, storage } from '../../firebase/config';
+import { auth, db } from '../../firebase/config';
 import { signOut } from 'firebase/auth';
 import { collection, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { ref, listAll, deleteObject } from 'firebase/storage';
 import { toast } from 'react-toastify';
+import { apagarDoCloudinary } from '@/lib/cloudinary';
 
 // Subcomponentes importados
 import { Imovel } from '../../types/imoveis';
@@ -21,34 +21,33 @@ export default function Dashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [abaAtiva, setAbaAtiva] = useState<'venda' | 'aluguel'>('venda');
 
-  const carregarImoveis = async () => {
-    try {
-      setLoading(true);
-      console.log("Buscando imóveis no Firestore...");
-
-      const querySnapshot = await getDocs(collection(db, 'imoveis'));
-      const listaImoveis: Imovel[] = [];
-
-      querySnapshot.forEach((docSnap) => {
-        listaImoveis.push({
-          id: docSnap.id,
-          ...docSnap.data()
-        } as Imovel);
-      });
-
-      // Ordena deixando os ativos no topo
-      listaImoveis.sort((a, b) => (a.ativo === b.ativo ? 0 : a.ativo ? -1 : 1));
-
-      setImoveis(listaImoveis);
-      console.log(`${listaImoveis.length} imóveis carregados com sucesso!`);
-    } catch (error) {
-      console.error("Erro ao carregar imóveis:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const carregarImoveis = async () => {
+      try {
+        console.log("Buscando imóveis no Firestore...");
+
+        const querySnapshot = await getDocs(collection(db, 'imoveis'));
+        const listaImoveis: Imovel[] = [];
+
+        querySnapshot.forEach((docSnap) => {
+          listaImoveis.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          } as Imovel);
+        });
+
+        // Ordena deixando os ativos no topo
+        listaImoveis.sort((a, b) => (a.ativo === b.ativo ? 0 : a.ativo ? -1 : 1));
+
+        setImoveis(listaImoveis);
+        console.log(`${listaImoveis.length} imóveis carregados com sucesso!`);
+      } catch (error) {
+        console.error("Erro ao carregar imóveis:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     carregarImoveis();
   }, []);
 
@@ -77,41 +76,34 @@ export default function Dashboard() {
     }
   };
 
-  // Função que realmente apaga os dados (executada após a confirmação)
   const executarExclusao = async (idImovel: string) => {
-    const idToast = toast.loading("Iniciando exclusão do imóvel...");
+    const idToast = toast.loading("Removendo imóvel...");
 
     try {
-      console.log(`Iniciando exclusão do imóvel: ${idImovel}`);
+      // Guarda as fotos antes de apagar, porque depois o imóvel some da lista
+      const fotosDoImovel = imoveis.find((i) => i.id === idImovel)?.fotos || [];
 
-      // PASSO 1: Limpar fotos do Storage
-      toast.update(idToast, { render: "1/2 - Removendo imagens do servidor..." });
-      const pastaStorageRef = ref(storage, `imoveis/${idImovel}`);
-      const listaArquivos = await listAll(pastaStorageRef);
+      await deleteDoc(doc(db, 'imoveis', idImovel));
+      setImoveis((prev) => prev.filter((imovel) => imovel.id !== idImovel));
 
-      if (listaArquivos.items.length > 0) {
-        const promessasDeExclusao = listaArquivos.items.map((arquivoRef) => deleteObject(arquivoRef));
-        await Promise.all(promessasDeExclusao);
+      // Limpeza das fotos é "melhor esforço": se falhar, o imóvel já foi removido
+      if (fotosDoImovel.length > 0) {
+        toast.update(idToast, { render: "Removendo fotos..." });
+        try {
+          await apagarDoCloudinary(fotosDoImovel);
+        } catch (delError) {
+          console.error("Fotos não apagadas no Cloudinary:", delError);
+        }
       }
 
-      // PASSO 2: Excluir documento do Firestore
-      toast.update(idToast, { render: "2/2 - Removendo dados do catálogo..." });
-      const imovelDocRef = doc(db, 'imoveis', idImovel);
-      await deleteDoc(imovelDocRef);
-
-      // Atualiza o estado da tela
-      setImoveis((prevImoveis) => prevImoveis.filter((imovel) => imovel.id !== idImovel));
-
-      // Sucesso
       toast.update(idToast, {
-        render: "Imóvel e fotos removidos permanentemente!",
+        render: "Imóvel removido com sucesso!",
         type: "success",
         isLoading: false,
         autoClose: 3000
       });
-
     } catch (error) {
-      console.error("Erro ao excluir imóvel e arquivos:", error);
+      console.error("Erro ao excluir imóvel:", error);
       toast.update(idToast, {
         render: "Erro ao tentar excluir o imóvel.",
         type: "error",

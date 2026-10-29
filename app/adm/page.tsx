@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from '../firebase/config'; // Certifique-se de que o caminho está correto de acordo com sua estrutura
+import { auth } from '../firebase/config';
 import Dashboard from './components/Dashboard';
 
 export default function Admin() {

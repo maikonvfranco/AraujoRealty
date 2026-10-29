@@ -2,13 +2,13 @@
 
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { db, storage } from '../../../firebase/config'; // Ajuste a quantidade de ../ conforme sua estrutura
+import { db } from '../../../firebase/config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Imovel } from '../../../types/imoveis'; 
+import { Imovel } from '../../../types/imoveis';
 import ImovelForm from "@/app/adm/components/ImovelForm";
 import imageCompression from 'browser-image-compression';
 import { toast } from 'react-toastify';
+import { uploadParaCloudinary, apagarDoCloudinary } from '@/lib/cloudinary';
 
 interface EditarImovelPageProps {
   params: Promise<{ id: string }>;
@@ -16,8 +16,7 @@ interface EditarImovelPageProps {
 
 export default function EditarImovelPage({ params }: EditarImovelPageProps) {
   const router = useRouter();
-  
-  // Resolve o ID da URL de forma segura no Next.js
+
   const resolvedParams = use(params);
   const idImovel = resolvedParams.id;
 
@@ -25,7 +24,6 @@ export default function EditarImovelPage({ params }: EditarImovelPageProps) {
   const [loadingDados, setLoadingDados] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Carrega os dados atuais do imóvel ao abrir a página
   useEffect(() => {
     const buscarImovel = async () => {
       try {
@@ -51,64 +49,53 @@ export default function EditarImovelPage({ params }: EditarImovelPageProps) {
 
   const handleEditarImovel = async (dadosAtualizados: Omit<Imovel, 'id'> | Imovel, novosArquivos: File[]) => {
     const idToast = toast.loading("Atualizando imóvel...");
-    
+
     try {
       setSubmitting(true);
 
-      // 1. Manter as fotos que já existiam e que não foram deletadas no formulário
-      const fotosExistentes = imovel?.fotos || [];
+      // Fotos que sobraram no formulário (as que o usuário não removeu com ✕)
+      const fotosMantidas = dadosAtualizados.fotos || [];
+
+      // Fotos que existiam no banco e não estão mais no formulário
+      const fotosRemovidas = (imovel?.fotos || []).filter(
+        (antiga) => !fotosMantidas.some((m) => m.path === antiga.path)
+      );
+
       const novasFotosMapeadas: { url: string; path: string }[] = [];
 
-      // 2. Processar e converter as NOVAS fotos, se houver
       if (novosArquivos.length > 0) {
         const options = {
-          maxSizeMB: 1,            
-          maxWidthOrHeight: 1920,  
-          useWebWorker: true,      
-          fileType: 'image/webp'   
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1920,
+          useWebWorker: true,
+          fileType: 'image/webp'
         };
 
         for (let i = 0; i < novosArquivos.length; i++) {
           const arquivo = novosArquivos[i];
-          toast.update(idToast, { 
-            render: `1/2 - Otimizando e enviando nova foto ${i + 1} de ${novosArquivos.length}...` 
+          toast.update(idToast, {
+            render: `1/3 - Otimizando e enviando nova foto ${i + 1} de ${novosArquivos.length}...`
           });
+
+          const pasta = `imoveis/${idImovel}`;
 
           try {
             const arquivoComprimidoBlob = await imageCompression(arquivo, options);
             const novoNome = arquivo.name.substring(0, arquivo.name.lastIndexOf('.')) + '.webp';
             const arquivoWebP = new File([arquivoComprimidoBlob], novoNome, { type: 'image/webp' });
 
-            const nomeUnico = `${Date.now()}_${arquivoWebP.name}`;
-            const caminhoStorage = `imoveis/${idImovel}/${nomeUnico}`;
-            const storageRef = ref(storage, caminhoStorage);
-            
-            const snapshot = await uploadBytes(storageRef, arquivoWebP);
-            const urlPublica = await getDownloadURL(snapshot.ref);
-            
-            novasFotosMapeadas.push({
-              url: String(urlPublica),
-              path: String(caminhoStorage)
-            });
+            novasFotosMapeadas.push(await uploadParaCloudinary(arquivoWebP, pasta));
           } catch (compError) {
             console.error(`Erro ao converter, enviando original...`, compError);
-            const nomeUnico = `${Date.now()}_${arquivo.name}`;
-            const caminhoStorage = `imoveis/${idImovel}/${nomeUnico}`;
-            const storageRef = ref(storage, caminhoStorage);
-            const snapshot = await uploadBytes(storageRef, arquivo);
-            const urlPublica = await getDownloadURL(snapshot.ref);
-            
-            novasFotosMapeadas.push({ url: String(urlPublica), path: String(caminhoStorage) });
+            novasFotosMapeadas.push(await uploadParaCloudinary(arquivo, pasta));
           }
         }
       }
 
-      toast.update(idToast, { render: "2/2 - Salvando alterações no banco..." });
+      toast.update(idToast, { render: "2/3 - Salvando alterações no banco..." });
 
-      // Unifica as fotos antigas com as novas que acabaram de subir
-      const listaFotosFinal = [...fotosExistentes, ...novasFotosMapeadas];
+      const listaFotosFinal = [...fotosMantidas, ...novasFotosMapeadas];
 
-      // 3. Atualizar o documento no Firestore
       const imovelRef = doc(db, 'imoveis', idImovel);
       await updateDoc(imovelRef, {
         nome: dadosAtualizados.nome,
@@ -119,12 +106,23 @@ export default function EditarImovelPage({ params }: EditarImovelPageProps) {
         ativo: dadosAtualizados.ativo,
         areaTerreno: dadosAtualizados.areaTerreno,
         valor: dadosAtualizados.valor,
-        fotos: listaFotosFinal // Array atualizado
+        fotos: listaFotosFinal
       });
 
-      toast.update(idToast, { 
-        render: "Imóvel atualizado com sucesso!", 
-        type: "success", 
+      // Só apaga no Cloudinary depois de salvar no Firestore.
+      // Se a limpeza falhar, o imóvel já está salvo e só sobra uma foto órfã.
+      if (fotosRemovidas.length > 0) {
+        toast.update(idToast, { render: "3/3 - Removendo fotos antigas..." });
+        try {
+          await apagarDoCloudinary(fotosRemovidas);
+        } catch (delError) {
+          console.error("Não foi possível apagar fotos no Cloudinary:", delError);
+        }
+      }
+
+      toast.update(idToast, {
+        render: "Imóvel atualizado com sucesso!",
+        type: "success",
         isLoading: false,
         autoClose: 3000
       });
@@ -133,9 +131,9 @@ export default function EditarImovelPage({ params }: EditarImovelPageProps) {
       router.refresh();
     } catch (error) {
       console.error("Erro ao atualizar:", error);
-      toast.update(idToast, { 
-        render: "Erro ao atualizar o imóvel.", 
-        type: "error", 
+      toast.update(idToast, {
+        render: "Erro ao atualizar o imóvel.",
+        type: "error",
         isLoading: false,
         autoClose: 4000
       });
@@ -158,12 +156,12 @@ export default function EditarImovelPage({ params }: EditarImovelPageProps) {
         <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] z-40 pointer-events-auto" />
       )}
 
-      <ImovelForm 
+      <ImovelForm
         titulo="Editar Imóvel"
         onSubmit={handleEditarImovel}
         submitting={submitting}
         onCancelar={() => router.push('/adm')}
-        dadosIniciais={imovel} // Passa os dados preenchidos para o formulário
+        dadosIniciais={imovel}
       />
     </div>
   );

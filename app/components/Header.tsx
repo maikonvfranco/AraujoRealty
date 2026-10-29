@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import Logo from '../../public/images/logo.webp'
 
 export default function Header() {
   return (
@@ -6,7 +7,7 @@ export default function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-26 flex items-center justify-between">
         <div className="flex items-center justify-center">
           <Image
-            src="/images/logo.png"
+            src={Logo}
             alt="Logo Araújo Imóveis e Família"
             width={80}
             height={40}
